@@ -6,6 +6,7 @@
 //
 
 import SwiftUI
+import AppKit
 
 let separator : Character = "/"
 
@@ -18,11 +19,13 @@ class Tweet : Identifiable, ObservableObject
     @Published var text  : String = ""
     @Published var ord   : String = ""
     @Published var count : Int = 0
+    @Published var selected : Bool = false
 
 }
 
 class Tweets : ObservableObject
 {
+    @Published var text     : String = ""
     @Published var tweets   : [Tweet] = []
     @Published var needsLoad: Bool = true
     @Published var needsSave: Bool = false
@@ -59,41 +62,20 @@ class Tweets : ObservableObject
 
     //one, two, three, four, five, six, seven, eight, nine, ten.
     
-    func denumber() {
-
-        var ord = 0 // don't prune zero
-        while ord < tweets.count
-        {
-            let tweet = tweets[ord]
-            var ch = tweet.text.last
-            
-            while (tweet.text.count > 0 && ch != nil && (ch!.isWhitespace || ch!.isNumber || ch!.isNewline || ch!=="/")) {
-                tweet.text.removeLast()
-                ch = tweet.text.last!
-            }
-
-            ord += 1
-        }
-    }
-    
     func flow() {
         
         var ord = 0
-        
-        denumber()
         
         while ord < tweets.count {
             
             let tweet = tweets[ord]
             tweet.ord = " \(ord+1)/\(tweets.count)"
             let   max = 280 - tweet.ord.count
-
-            print("\(tweet.text) len=\(tweet.text.count)")
             
             if tweet.text.count >= max
             {
                 if (ord >= tweets.count - 1) {
-                    print("adding tweet")
+                    print("flow last tweet")
                     addTweet()
                 }
 
@@ -114,61 +96,79 @@ class Tweets : ObservableObject
             ord += 1
         }
  
-        prune()
-        renumber()
-        
         needsSave = true
     }
 
+    func split() {
+
+        var pattern = 0
+        var data    = text
+
+        tweets = []
+        var tweet = Tweet()
+        var next  = Tweet()
+        let   max = 274
+        
+        while (data.count > 0)
+        {
+            var ch = data.removeFirst()
+             
+            if (ch.isNewline && pattern >= 3) {
+//                tweet.text.removeLast()
+                print("split \(tweet.text)")
+                addTweet(tweet)
+                tweet = next
+                next  = Tweet()
+                pattern = 0
+            }
+            else if (ch == "_")
+            {
+                pattern += 1
+            }
+            else {
+                pattern = 0
+                tweet.text.append(ch)
+            }
+
+            if (tweet.text.count >= max) {
+                while (tweet.text.count >= max || ch != " ")
+                {
+                    print("backing up to space \(ch)")
+                    ch = tweet.text.removeLast()
+                    next.text.insert(ch, at: next.text.startIndex)
+                }
+                addTweet(tweet)
+                tweet = next
+                next  = Tweet()
+            }
+        }
+
+        print("split final \(tweet.text) : \(next.text) ")
+
+        if (tweet.text.count > 0) {
+            addTweet(tweet)
+        }
+        
+        if (next.text.count > 0) {
+            addTweet(next)
+        }
+    }
+    
     func load()
     {
         let DocumentDirURL = try! FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let fileURL = DocumentDirURL.appendingPathComponent(filename).appendingPathExtension("txt")
         
-        print("FilePath: \(fileURL.path)")
-
         do {
-            var data = try String(contentsOfFile: fileURL.path, encoding: .utf8)
-
-            tweets = []
-            var tweet : String = ""
-            var pattern = 0
-            
-            while (data.count > 0)
-            {
-                let ch = data.removeFirst()
-                tweet.append(ch)
-
-                if (ch.isNumber || ch.isNewline || ch=="/")  { pattern += 1 }
-                else { pattern = 0 }
-
-                print("char \(ch) pattern \(pattern)")
-                
-                if (ch.isNewline && pattern > 3) {
-
-                    if (ch.isNewline) { tweet.removeLast() }
-
-                    print("added tweet \(tweet)")
-                    addTweet(text: tweet)
-                    tweet = ""
-                }
-            }
-
-            if (tweet.count > 0) {
-                print("added remainder \(tweet)")
-                addTweet(text: tweet)
-            }
-            
+            text = try String(contentsOfFile: fileURL.path, encoding: .utf8)
+            split()
+            renumber()
         }
         catch {
             print("error loading file")
         }
         
         print("loaded \(filename)")
-
-        denumber()
-        flow()
-        prune()
 
         needsLoad = false
         needsSave = false
@@ -181,13 +181,8 @@ class Tweets : ObservableObject
 
         print("FilePath: \(fileURL.path)")
 
-        var data = ""
-        for tweet in tweets {
-            data.append(tweet.text + "\n")
-        }
-        
         do {
-            try data.write(to: fileURL, atomically: false, encoding: String.Encoding.utf8)
+            try text.write(to: fileURL, atomically: false, encoding: String.Encoding.utf8)
         }
         catch {
             print("error writing to file")
@@ -196,6 +191,11 @@ class Tweets : ObservableObject
         print("saved \(filename)")
         
         needsSave = false
+    }
+
+    func addTweet(_ tweet: Tweet) {
+        tweets.append(tweet)
+        tweet.count = tweet.text.count
     }
 
     func addTweet() {
@@ -212,36 +212,43 @@ class Tweets : ObservableObject
 
     init() {
         tweets.append(Tweet())
-        tweets.append(Tweet())
-        tweets.append(Tweet())
-        flow()
     }
 }
 
 struct TweetView: View {
     @ObservedObject var tweet  : Tweet
     @ObservedObject var tweets : Tweets
-
+    
     var body: some View {
-        HStack {
-            Text("\(tweet.count)")
-                .foregroundColor(.red)
-                .padding(.trailing)
-                .frame(maxWidth: 50)
+        HStack(alignment: .top, spacing: 1)
+        {
+            VStack {
+                Text("\(tweet.ord)")
+                    .foregroundColor(.white)
+                    .padding(.trailing)
+                    .frame(maxWidth: 50)
 
-            TextEditor(text: $tweet.text)
-                .onChange(of: tweet.text, perform: { value in
-                    tweet.count      = value.count
-                    tweets.needsSave = true
-                })
+                Text("\(tweet.count)")
+                    .foregroundColor(.red)
+                    .padding(.trailing)
+                    .frame(maxWidth: 50)
+            }.frame(width: 40)
+            
+            Text(tweet.text)
                 .padding(1)
-                .border(Color.red, width: 1)
-                .frame(minHeight: 20)
+                .frame(width: 400, alignment: .topLeading)
+                .border(tweet.selected ? Color.blue : Color.red, width: 1)
+                .background(tweet.selected ? Color.white : Color.black)
+                .foregroundColor(tweet.selected ? Color.black : Color.white)
+                .onTapGesture {
+                    for twt in tweets.tweets { twt.selected = false }
+                    tweet.selected = true
+                    let pb = NSPasteboard.general
+                    pb.clearContents()
+                    let ret = pb.setString(tweet.text, forType: .string)
+                    print("copy \(ret)")
 
-            Text("\(tweet.ord)")
-                .foregroundColor(.white)
-                .padding(.trailing)
-                .frame(maxWidth: 50)
+                }
         }
     }
 }
@@ -272,21 +279,23 @@ struct ContentView: View {
                 }
             }
         }
-        
-        ScrollView(.vertical, showsIndicators: true)
+
+        VStack
         {
-            ForEach(tweets.tweets) { tweet in
-                TweetView(tweet: tweet, tweets: tweets)
-            }
-        }
-        HStack {
-            Button(action: tweets.addTweet)
-            {
-                Text("Tweet ")
-            }
-            Button(action: tweets.flow)
-            {
-                Text("Reflow")
+            HStack {
+                TextEditor(text: $tweets.text)
+                    .onChange(of: tweets.text, perform: { value in
+                        tweets.needsSave = true
+                        tweets.split()
+                        tweets.renumber()
+                    })
+                    .font(.system(size: 14, weight: .bold, design: .default))
+
+                List {
+                    ForEach(tweets.tweets) { tweet in
+                        TweetView(tweet: tweet, tweets: tweets)
+                    }
+                }.frame(width: 500)
             }
         }
     }
