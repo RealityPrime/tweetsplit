@@ -112,7 +112,7 @@ class Tweets : ObservableObject
         
         while (data.count > 0)
         {
-            var ch = data.removeFirst()
+            var ch : Character = data.removeFirst()
              
             if (ch == "_")
             {
@@ -122,7 +122,10 @@ class Tweets : ObservableObject
                 addTweet(tweet)
                 tweet = next
                 next  = Tweet()
-                tweet.text.append(ch)
+                if (ch != "\n" && ch != " ")
+                {
+                    tweet.text.append(ch)
+                }
                 pattern = 0
             }
             else {
