@@ -28,7 +28,6 @@ class Tweets : ObservableObject
     @Published var text     : String = ""
     @Published var tweets   : [Tweet] = []
     @Published var needsLoad: Bool = true
-    @Published var needsSave: Bool = false
     @Published var filename : String = "tweet.storm"
 
     func prune() {
@@ -51,15 +50,20 @@ class Tweets : ObservableObject
         var ord = 0 // don't prune zero
         while ord < tweets.count
         {
+
             let tweet = tweets[ord]
-            tweet.ord = "\(ord+1)/\(tweets.count)"
-            
-            tweet.text.append(" " + tweet.ord)
+            tweet.ord = genOrd(ord,tweets.count)
+            tweet.text = tweet.ord + tweet.text
             
             ord += 1
         }
     }
 
+    func genOrd(_ ord: Int, _ total: Int) -> String
+    {
+        return "(\(ord+1)/\(tweets.count))\n"
+    }
+    
     //one, two, three, four, five, six, seven, eight, nine, ten.
     
     func flow() {
@@ -69,8 +73,7 @@ class Tweets : ObservableObject
         while ord < tweets.count {
             
             let tweet = tweets[ord]
-            tweet.ord = " \(ord+1)/\(tweets.count)"
-            let   max = 280 - tweet.ord.count
+            let max = 280 - genOrd(ord, tweets.count).count
             
             if tweet.text.count >= max
             {
@@ -89,14 +92,12 @@ class Tweets : ObservableObject
                 }
                 
                 tweet.count = tweet.text.count
-                next.count = next.text.count
+                next.count  = next.text.count
 
             }
 
             ord += 1
         }
- 
-        needsSave = true
     }
 
     func split() {
@@ -113,29 +114,30 @@ class Tweets : ObservableObject
         {
             var ch = data.removeFirst()
              
-            if (ch.isNewline && pattern >= 3) {
-//                tweet.text.removeLast()
-                print("split \(tweet.text)")
-                addTweet(tweet)
-                tweet = next
-                next  = Tweet()
-                pattern = 0
-            }
-            else if (ch == "_")
+            if (ch == "_")
             {
                 pattern += 1
             }
-            else {
-                pattern = 0
+            else if (pattern >= 3) {
+                addTweet(tweet)
+                tweet = next
+                next  = Tweet()
                 tweet.text.append(ch)
+                pattern = 0
+            }
+            else {
+                tweet.text.append(ch)
+                pattern = 0
             }
 
             if (tweet.text.count >= max) {
-                while (tweet.text.count >= max || ch != " ")
+                // back up to last whitespace
+                while (ch != " ")
                 {
-                    print("backing up to space \(ch)")
                     ch = tweet.text.removeLast()
-                    next.text.insert(ch, at: next.text.startIndex)
+                    if (ch != " ") {
+                        next.text.insert(ch, at: next.text.startIndex)
+                    }
                 }
                 addTweet(tweet)
                 tweet = next
@@ -143,7 +145,7 @@ class Tweets : ObservableObject
             }
         }
 
-        print("split final \(tweet.text) : \(next.text) ")
+//        print("split final \(tweet.text) : \(next.text) ")
 
         if (tweet.text.count > 0) {
             addTweet(tweet)
@@ -171,15 +173,31 @@ class Tweets : ObservableObject
         print("loaded \(filename)")
 
         needsLoad = false
-        needsSave = false
+        changed   = false
+    }
+    
+    var queued   : Bool = false
+    
+    var changed  : Bool
+    {
+        didSet {
+            if (changed && !queued) {
+                let seconds = 0.05
+                queued = true
+                DispatchQueue.main.asyncAfter(deadline: .now() + seconds) {
+                    self.save()
+                    self.split()
+                    self.renumber()
+                    self.queued = false
+                }
+            }
+        }
     }
     
     func save()
     {
         let DocumentDirURL = try! FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
         let fileURL = DocumentDirURL.appendingPathComponent(filename).appendingPathExtension("txt")
-
-        print("FilePath: \(fileURL.path)")
 
         do {
             try text.write(to: fileURL, atomically: false, encoding: String.Encoding.utf8)
@@ -189,8 +207,7 @@ class Tweets : ObservableObject
         }
 
         print("saved \(filename)")
-        
-        needsSave = false
+        changed = false
     }
 
     func addTweet(_ tweet: Tweet) {
@@ -211,6 +228,7 @@ class Tweets : ObservableObject
     }
 
     init() {
+        changed  = false
         tweets.append(Tweet())
     }
 }
@@ -226,13 +244,13 @@ struct TweetView: View {
                 Text("\(tweet.ord)")
                     .foregroundColor(.white)
                     .padding(.trailing)
-                    .frame(maxWidth: 50)
+                    .frame(maxWidth: 55)
 
                 Text("\(tweet.count)")
                     .foregroundColor(.red)
                     .padding(.trailing)
-                    .frame(maxWidth: 50)
-            }.frame(width: 40)
+                    .frame(maxWidth: 55)
+            }.frame(width: 55)
             
             Text(tweet.text)
                 .padding(1)
@@ -263,6 +281,7 @@ struct ContentView: View {
             TextField("Filename:", text: $tweets.filename)
                 .onChange(of: tweets.filename, perform: { value in
                     tweets.needsLoad = true
+                    tweets.changed   = false // don't save during name changes
                 })
 
             if (tweets.needsLoad) {
@@ -272,11 +291,9 @@ struct ContentView: View {
                 }
             }
             
-            if (tweets.needsSave) {
-                Button(action: tweets.save)
-                {
-                    Text("Save")
-                }
+            Button(action: tweets.save)
+            {
+                Text("Save")
             }
         }
 
@@ -285,9 +302,7 @@ struct ContentView: View {
             HStack {
                 TextEditor(text: $tweets.text)
                     .onChange(of: tweets.text, perform: { value in
-                        tweets.needsSave = true
-                        tweets.split()
-                        tweets.renumber()
+                        tweets.changed   = true
                     })
                     .font(.system(size: 14, weight: .bold, design: .default))
 
