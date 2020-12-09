@@ -193,7 +193,7 @@ class Tweets : ObservableObject
             }
         }
     }
-    
+
     func save()
     {
         let DocumentDirURL = try! FileManager.default.url(for: .documentDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
