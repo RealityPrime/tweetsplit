@@ -29,6 +29,7 @@ class Tweets : ObservableObject
     @Published var tweets   : [Tweet] = []
     @Published var needsLoad: Bool = true
     @Published var filename : String = "tweet.storm"
+    @Published var numberFirst : Bool = false
 
     func prune() {
         var i = 0
@@ -45,7 +46,7 @@ class Tweets : ObservableObject
             }
         }
     }
-
+    
     func renumber() {
         var ord = 0 // don't prune zero
         while ord < tweets.count
@@ -53,111 +54,80 @@ class Tweets : ObservableObject
 
             let tweet = tweets[ord]
             tweet.ord = genOrd(ord,tweets.count)
-            tweet.text = tweet.ord + tweet.text
             
+            if (!numberFirst) {
+                tweet.text = tweet.text + " " + tweet.ord
+            } else {
+                tweet.text = tweet.ord + " " + tweet.text
+            }
             ord += 1
         }
     }
 
     func genOrd(_ ord: Int, _ total: Int) -> String
     {
-        return "(\(ord+1)/\(tweets.count))\n"
+        return "(\(ord+1)/\(tweets.count))"
     }
     
     //one, two, three, four, five, six, seven, eight, nine, ten.
     
-    func flow() {
-        
-        var ord = 0
-        
-        while ord < tweets.count {
-            
-            let tweet = tweets[ord]
-            let max = 280 - genOrd(ord, tweets.count).count
-            
-            if tweet.text.count >= max
+    func length(_ tweet : String) -> Int {
+        let len = tweet.count
+        let split = tweet.split(separator: "\n")
+        var sub = 0
+
+        for word in split {
+            if (word.hasPrefix("http"))
             {
-                if (ord >= tweets.count - 1) {
-                    print("flow last tweet")
-                    addTweet()
-                }
-
-                let next = tweets[ord+1]
-                var ch : Character = "@"
-                
-                while (tweet.text.count >= max || ch != " ")
-                {
-                    ch = tweet.text.removeLast()
-                    next.text.insert(ch, at: next.text.startIndex)
-                }
-                
-                tweet.count = tweet.text.count
-                next.count  = next.text.count
-
+                sub += word.count - 16
+                print("sub http \(sub)")
             }
-
-            ord += 1
         }
+        return len - sub
     }
-
+    
     func split() {
 
-        var pattern = 0
-        var data    = text
 
+        let   max = 270
+
+        var tweet  = Tweet()
+        var len    = 0
+        let words  = text.split(separator: "\n", maxSplits: 9999, omittingEmptySubsequences: false)
+  
         tweets = []
-        var tweet = Tweet()
-        var next  = Tweet()
-        let   max = 274
         
-        while (data.count > 0)
-        {
-            var ch : Character = data.removeFirst()
-             
-            if (ch == "_")
+        for word in words {
+
+            var wordLen = word.count
+            print("processing [\(word)]")
+            
+            if word.hasPrefix("http")
             {
-                pattern += 1
-            }
-            else if (pattern >= 3) {
-                addTweet(tweet)
-                tweet = next
-                next  = Tweet()
-                if (ch != "\n" && ch != " ")
-                {
-                    tweet.text.append(ch)
-                }
-                pattern = 0
-            }
-            else {
-                tweet.text.append(ch)
-                pattern = 0
+                print("http")
+                wordLen = 16
             }
 
-            if (tweet.text.count >= max) {
-                // back up to last whitespace
-                while (ch != " ")
-                {
-                    ch = tweet.text.removeLast()
-                    if (ch != " ") {
-                        next.text.insert(ch, at: next.text.startIndex)
-                    }
+            if len + wordLen + 1 >= max || word == "___"
+            {
+                if (tweet.text.last == "\n") {
+                    tweet.text.removeLast()
                 }
                 addTweet(tweet)
-                tweet = next
-                next  = Tweet()
+                tweet = Tweet()
+                len = 0
             }
-        }
 
-//        print("split final \(tweet.text) : \(next.text) ")
+            if (word != "___") {
+                tweet.text.append(contentsOf: word)
+                tweet.text.append("\n")
+                len += wordLen + 1
+            }
 
-        if (tweet.text.count > 0) {
-            addTweet(tweet)
         }
-        
-        if (next.text.count > 0) {
-            addTweet(next)
-        }
-    }
+        // final words
+        addTweet(tweet)
+     }
     
     func load()
     {
@@ -215,7 +185,7 @@ class Tweets : ObservableObject
 
     func addTweet(_ tweet: Tweet) {
         tweets.append(tweet)
-        tweet.count = tweet.text.count
+        tweet.count = length(tweet.text)
     }
 
     func addTweet() {
@@ -226,7 +196,7 @@ class Tweets : ObservableObject
         
         let tweet = Tweet()
         tweet.text  = text
-        tweet.count = text.count
+        tweet.count = length(tweet.text)
         tweets.append(tweet)
     }
 
@@ -298,6 +268,14 @@ struct ContentView: View {
             {
                 Text("Save")
             }
+            
+            Toggle(isOn: $tweets.numberFirst) {
+                Text("Number First")
+            }
+            .onChange(of: tweets.numberFirst, perform: { value in
+                tweets.split()
+                tweets.renumber()
+            })
         }
 
         VStack
